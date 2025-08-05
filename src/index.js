@@ -1,21 +1,30 @@
 // Importaciones
 const express = require("express");
+const mysql = require("mysql2/promise");
 const cors = require("cors");
-const mysql2 = require("mysql2/promise");
-const port = process.env.PORT || 4000;
 require("dotenv").config();
+const app = express();
+const PORT = process.env.PORT || 4000;
 
-// Crear y configurar del servidor
-const server = express();
-server.use(cors());
-server.use(express.json());
-server.listen(port, () => {
-  console.log(`Servidor escuchando en el puerto ${port}`);
+// Middleware para parsear JSON
+app.use(express.json());
+app.use(cors());
+
+
+
+app.get("/", (req, res) => {
+  res.send(" Los Simpsons funcionando.");
 });
 
-// Conectarse a MySQL
-const getConnection = async () => {
-  return await mysql2.createConnection({
+
+// Servidor
+app.listen(PORT, () => {
+  console.log(`Servidor escuchando en http://localhost:${PORT}`);
+});
+
+// Conexión con variables de entorno
+    const getConnection = async () => {
+    return await mysql.createConnection({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
@@ -24,121 +33,218 @@ const getConnection = async () => {
   });
 };
 
-// Escuhar el servidor
+// con el post queda la info sin mostrarse
+// Insertar una nueva frase
+app.post("/frases", async (req, res) => {
+  const { texto, marca_tiempo, descripcion, personaje_id, capitulo_id } = req.body;
 
-// ------------------ ENDPOINTS CRUD ------------------
+  if (!texto || !marca_tiempo || !descripcion || !personaje_id || !capitulo_id) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Faltan campos obligatorios: texto, marca de tiempo, descripción o personaje",
+    });
+  }
 
-// GET /frases (lista todas las frases con info de personaje y capítulo)
-server.get("/frases", async (req, res) => {
   try {
-    const conn = await getConnection();
-    const [results] = await conn.query(`
-      SELECT frases.id, frases.texto, frases.marca_tiempo, frases.descripcion,
-             personajes.nombre AS personaje,
-             capitulos.titulo AS capitulo
-      FROM frases
+    const connection = await getConnection();
+    const [result] = await connection.execute(
+      "INSERT INTO frases (texto, marca_tiempo, descripcion, personaje_id, capitulo_id) VALUES (?, ?, ?, ?, ?)",
+      [texto, marca_tiempo, descripcion, personaje_id, capitulo_id]
+    );
+    
+
+    res.status(201).json({
+      success: true,
+      id: result.insertId,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error al crear una frase",
+    });
+  }
+});
+
+/* INSERTAMOS UNA NUEVA FRASE 
+curl -X POST -H "Content-Type: application/json" -d "{\"texto\": \"Marge entra por la puerta.\",
+ \"marca_tiempo\": \"00:00:07\", \"descripcion\": \"Hola soy una descripcion.\", \"personaje_id\": 2, \"capitulo_id\": 2}" http://localhost:4000/frases
+*/
+
+// Listar todas las frases (con info del personaje y el tit del capitulo)
+app.get("/frases", async (req, res) => {
+  try {
+    const connection = await getConnection();
+    const [frase_result] = await connection.execute(`
+      SELECT  frases.*, personajes.*, capitulos.titulo
+      FROM frases 
       JOIN personajes ON frases.personaje_id = personajes.id
-      JOIN capitulos ON frases.capitulo_id = capitulos.id
+      JOIN capitulos ON frases.capitulo_id = capitulos.id;
     `);
-    await conn.end();
+    await connection.end();
+
     res.json({
-      total: { count: results.length },
-      results,
+      info: { count: frase_result.length },
+      results: frase_result,
     });
   } catch (error) {
     res.status(500).json({ error: "Error al obtener las frases" });
   }
 });
 
-// GET /frases/:id (una frase específica)
-server.get("/frases/:id", async (req, res) => {
-  const fraseId = req.params.id;
+// Obtener una frase específica
+app.get("/frases/:id", async (req, res) => {
+  const { id } = req.params;
   try {
-    const conn = await getConnection();
-    const [results] = await conn.query(
-      `
-      SELECT frases.id, frases.texto, frases.marca_tiempo, frases.descripcion,
-             personajes.nombre AS personaje,
-             capitulos.titulo AS capitulo
-      FROM frases
-      JOIN personajes ON frases.personaje_id = personajes.id
-      JOIN capitulos ON frases.capitulo_id = capitulos.id
-      WHERE frases.id = ?
-    `,
-      [fraseId]
+    const connection = await getConnection();
+    const [rows] = await connection.execute(
+      "SELECT * FROM frases WHERE id = ?",
+      [id]
     );
-    await conn.end();
+    await connection.end(); //cierra la conexion  
 
-    if (results.length > 0) {
-      res.json(results[0]);
-    } else {
-      res.status(404).json({ error: "La frase no se encuentra" });
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Frase no encontrada" });
     }
+    //respuesta siempre es json
+    res.json(rows[0]);
   } catch (error) {
     res.status(500).json({ error: "Error al obtener la frase" });
   }
 });
 
-// POST /frases (crear nueva frase)
-server.post("/frases", async (req, res) => {
-  const { texto, marca_tiempo, descripcion, personaje_id, capitulo_id } =
-    req.body;
+// Actualizar una frase existente
+app.put("/frases/:id", async (req, res) => {
+  const { id } = req.params;
+  const { texto, marca_tiempo, descripcion, personaje_id, capitulo_id } = req.body;
+
+  if (!texto || !marca_tiempo || !descripcion || !personaje_id || !capitulo_id) {
+    return res.status(400).json({
+      success: false,
+      message:
+        "Faltan campos obligatorios: texto, marca de tiempo, descripción o personaje",
+    });
+  }
+
   try {
-    const conn = await getConnection();
-    const query = `
-      INSERT INTO frases (texto, marca_tiempo, descripcion, personaje_id, capitulo_id)
-      VALUES (?, ?, ?, ?, ?)
-    `;
-    const [result] = await conn.query(query, [
-      texto,
-      marca_tiempo,
-      descripcion,
-      personaje_id,
-      capitulo_id,
-    ]);
-    await conn.end();
-    res.status(201).json({ id: result.insertId, message: "Frase añadida" });
+    const connection = await getConnection();
+    const [result] = await connection.execute(
+      "UPDATE frases SET texto = ?, marca_tiempo = ?, descripcion = ?, personaje_id = ?, capitulo_id = ? WHERE id = ?",
+      [texto, marca_tiempo, descripcion, personaje_id, capitulo_id, id]
+    );
+    await connection.end();
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Frase no encontrada",
+      });
+    }
+
+    res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: "Error al añadir la frase" });
+    res.status(500).json({
+      success: false,
+      message: "Error al actualizar la frase",
+    });
+  }
+});
+/*
+curl -X PUT -H "Content-Type: application/json" -d "{\"texto\": \"Marge se va al gimnasio.\", 
+\"marca_tiempo\": \"00:00:07\", \"descripcion\": \"Hola soy una descripcion.\", \"personaje_id\": 2, \"capitulo_id\": 2}" http://localhost:4000/frases/7
+*/
+
+// Eliminar una frase
+app.delete("/frases/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const connection = await getConnection();
+    const [result] = await connection.execute(
+      "DELETE FROM frases WHERE id = ?",
+      [id]
+    );
+    await connection.end();
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Frase no encontrada",
+      });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error al eliminar la frase",
+    });
   }
 });
 
-// PUT /frases/:id (actualizar frase)
-server.put("/frases/:id", async (req, res) => {
-  const fraseId = req.params.id;
-  const { texto, marca_tiempo, descripcion, personaje_id, capitulo_id } =
-    req.body;
+/*curl -X DELETE http://localhost:4000/frases/7
+*/
+
+
+/* // Obtener todas las frases de un personaje específico
+app.get("/frases/personaje/:personaje_id", async (req, res) => {
+  const { personaje_id } = req.params;
+
   try {
-    const conn = await getConnection();
-    const query = `
-      UPDATE frases
-      SET texto = ?, marca_tiempo = ?, descripcion = ?, personaje_id = ?, capitulo_id = ?
-      WHERE id = ?
-    `;
-    await conn.query(query, [
-      texto,
-      marca_tiempo,
-      descripcion,
-      personaje_id,
-      capitulo_id,
-      fraseId,
-    ]);
-    await conn.end();
-    res.json({ message: "Frase actualizada" });
+    const connection = await getConnection();
+    const [rows] = await connection.execute(
+      "SELECT * FROM frases WHERE personaje_id = ?",
+      [personaje_id]
+    );
+    await connection.end();
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "No se encontraron frases para este personaje" });
+    }
+
+    res.json({
+      info: { count: rows.length },
+      results: rows,
+    });
   } catch (error) {
-    res.status(500).json({ error: "Error al actualizar la frase" });
+    res.status(500).json({ error: "Error al obtener las frases del personaje" });
+  }
+}); */
+
+// Obtener todas las frases de un capítulo específico
+// Pendiente 
+
+// Listar todos los personajes
+app.get("/personajes", async (req, res) => {
+  try { 
+    const connection = await getConnection();
+    
+    const [rows] = await connection.execute("SELECT * FROM personajes;");
+    await connection.end();
+
+    
+    res.json({
+      info: { count: rows.length },
+      results: rows,
+    });
+  } catch (error) {
+    console.error("Error :", error);
+    res.status(500).json({ error: "Error al obtener los personajes" });
   }
 });
 
-// DELETE /frases/:id (eliminar frase)
-server.delete("/frases/:id", async (req, res) => {
-  const fraseId = req.params.id;
+// Listar todos los capítulos
+app.get("/capitulos", async (req, res) => {
   try {
-    const conn = await getConnection();
-    await conn.query("DELETE FROM frases WHERE id = ?", [fraseId]);
-    await conn.end();
-    res.json({ message: "Frase borrada" });
+    const connection = await getConnection();
+    const [rows] = await connection.execute("SELECT * FROM capitulos;");
+    await connection.end();
+
+    res.json({
+      info: { count: rows.length },
+      results: rows,
+    });
   } catch (error) {
-    res.status(500).json({ error: "Error al eliminar la frase" });
+    res.status(500).json({ error: "Error al obtener los capítulos" });
   }
 });
