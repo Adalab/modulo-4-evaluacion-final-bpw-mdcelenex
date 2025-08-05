@@ -186,32 +186,7 @@ app.delete("/frases/:id", async (req, res) => {
 */
 
 
-/* // Obtener todas las frases de un personaje específico
-app.get("/frases/personaje/:personaje_id", async (req, res) => {
-  const { personaje_id } = req.params;
 
-  try {
-    const connection = await getConnection();
-    const [rows] = await connection.execute(
-      "SELECT * FROM frases WHERE personaje_id = ?",
-      [personaje_id]
-    );
-    await connection.end();
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "No se encontraron frases para este personaje" });
-    }
-
-    res.json({
-      info: { count: rows.length },
-      results: rows,
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Error al obtener las frases del personaje" });
-  }
-}); */
-
-// Obtener todas las frases de un capítulo específico
 // Pendiente 
 
 // Listar todos los personajes
